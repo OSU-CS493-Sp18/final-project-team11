@@ -1,0 +1,16 @@
+# ignore file added my macos
+.DS_Store
+
+# ignore node packages
+node_modules/
+
+# ignore proposal
+Proposal/
+
+# ignore LaTex build files
+*.aux
+*.pdf
+*.gz
+*.toc
+*.log
+*.synctex.gz
