@@ -1,0 +1,53 @@
+version: '3.6'
+services:
+  smart-farm-api:
+    # uncomment the below volume to mount the cur dir to app in container, so nodemon will work
+    volumes:
+      - ./:/usr/src/app
+    build: .
+    image: smart-farm-api
+    container_name:
+      smart-farm-api
+    restart: always
+    command: "npm run dev"
+    ports:
+      - "8000:8000"
+    networks:
+      - smart-farm-network
+    links:
+        - db_mongo
+    depends_on:
+        - db_mongo
+    environment:
+      MONGO_HOST: db_mongo
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      MONGO_USER: ${MONGO_USER}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_PORT: 27017
+      SECRET_KEY: ${SECRET_KEY}
+
+  db_mongo:
+    image: mongo:latest
+    container_name: db_mongo
+    restart: always
+    environment:
+      - MONGO_DATA_DIR=/data/db
+      - MONGO_INITDB_DATABASE=${MONGO_DATABASE}
+      - MONGO_INITDB_ROOT_USERNAME=${ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${ROOT_PASSWORD}
+    volumes:
+      - db_mongo-data:/data/db
+      - ./db-init/:/docker-entrypoint-initdb.d/
+    ports:
+      - 27017:27017
+    networks:
+      - smart-farm-network
+
+
+volumes:
+  db_mongo-data:
+
+networks:
+  smart-farm-network:
+    driver:
+      bridge

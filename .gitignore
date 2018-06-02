@@ -5,7 +5,10 @@
 node_modules/
 
 # ignore proposal
-Proposal/
+Proposal.pdf
+
+# enviornment variables file
+.env
 
 # ignore LaTex build files
 *.aux
