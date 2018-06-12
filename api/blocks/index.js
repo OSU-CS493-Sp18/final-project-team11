@@ -119,9 +119,9 @@ router.get('/:blockID', requireAuthentication, function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const blockID = req.params.blockID;
   let retObj = {};
-  /* used to extract ids of sensors to get the avergae temp, soil, and irrigation
-      data in the block */
-  let allSensorsInBlock = [];
+  let tempSensorIDs = [];
+  let soilSensorIDs = [];
+  let irriSensorIDs = [];
 
   getBlockByID(blockID, mongoDB)
     .then((blockObject) => {
@@ -138,12 +138,21 @@ router.get('/:blockID', requireAuthentication, function(req, res, next) {
         return getSensorsInBlock(blockID, mongoDB);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to block with id: ${blockID}`
+          err: `User doesn't have authorization to get the block with id: ${blockID}`
         });
       }
     })
      .then((sensorsInBlock) => {
-       allSensorsInBlock = (sensorsInBlock || [])
+       /* Get IDs of sensor based on type */
+       for(var sensor of sensorsInBlock){
+         if (sensor && sensor.type == "temperature")
+           tempSensorIDs.push(sensor._id.toString())
+         else if (sensor && sensor.type == "soil")
+           soilSensorIDs.push(sensor._id.toString())
+         else if (sensor && sensor.type == "irrigation")
+           irriSensorIDs.push(sensor._id.toString())
+       }
+
        let {
          start,
          end,
@@ -164,12 +173,7 @@ router.get('/:blockID', requireAuthentication, function(req, res, next) {
          retObj.links.prevPage = `/blocks/${blockID}?page=` + (pageNumber - 1);
          retObj.links.firstPage = `/blocks/${blockID}?page=1`;
        }
-       /* extract ids of temperature sensors */
-       let tempSensorIDs = allSensorsInBlock.map(obj => {
-         if(obj.type === "temperature"){
-           return obj._id.toString();
-         }
-       });
+       /* get temperatures from temp sensors */
        if (tempSensorIDs.length > 0){
          return getAvgTempFromSensorIDs(tempSensorIDs, mongoDB);
        } else {
@@ -180,12 +184,7 @@ router.get('/:blockID', requireAuthentication, function(req, res, next) {
       if (avgTemp != null){
         retObj.avgTemp = avgTemp;
       }
-      /* extract ids of soil data from sensors */
-      let soilSensorIDs = allSensorsInBlock.map(obj => {
-        if(obj.type === "soil"){
-          return obj._id.toString();
-        }
-      });
+      /* get soil data from soil sensors */
       if (soilSensorIDs.length > 0) {
         return getAvgSoilData(soilSensorIDs, mongoDB);
       } else {
@@ -196,12 +195,7 @@ router.get('/:blockID', requireAuthentication, function(req, res, next) {
       if (avgSoilData != null){
         retObj.avgSoilData = avgSoilData;
       }
-      /* extract ids of irrigation data from sensors */
-      let irriSensorIDs = allSensorsInBlock.map(obj => {
-        if(obj.type === "irrigation"){
-          return obj._id.toString();
-        }
-      });
+      /* get irrigation times from irrigation sensors */
       if (irriSensorIDs.length > 0) {
         return getAvgIrrigationTime(irriSensorIDs, mongoDB);
       } else {
@@ -237,7 +231,7 @@ router.post('/', requireAuthentication, function(req, res, next) {
           return getFarmByID(farmID, mongoDB);
         } else {
           res.status(403).json({
-            err: `User doesn't have access to farm with id: ${farmID}`
+            err: `User doesn't have authorization to post a block to farm with id: ${farmID}`
           });
         }
       })
@@ -288,7 +282,7 @@ router.put('/:blockID', requireAuthentication, function(req, res, next) {
           return getFarmByID(block.farmID, mongoDB)
         } else {
           res.status(403).json({
-            err: `User doesn't have access to block with id: ${blockID}`
+            err: `User doesn't have authorization to update block with id: ${blockID}`
           });
         }
       })
@@ -341,7 +335,7 @@ router.delete('/:blockID', requireAuthentication, function(req, res, next) {
         return deleteBlock(blockID, mongoDB)
       } else {
         res.status(403).json({
-          err: `User doesn't have access to block with id: ${blockID}`
+          err: `User doesn't have authorization to delete block with id: ${blockID}`
         });
       }
     })

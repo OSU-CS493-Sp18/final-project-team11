@@ -18,15 +18,27 @@ const { requireAuthentication, hasAccessToFarm,
 
 
 
-function getAvgSoilData(listOfIDs, mongoDB){
+function getAvgSoilData(listOfSensorIDs, mongoDB){
   return new Promise(function(resolve, reject) {
     const soilsCollection = mongoDB.collection('soils');
-    soilsCollection.find( {_id : { $in : listOfIDs } } )
+    const oneDay = 24 * 60 * 60 * 1000;
+    const past24Hrs =  new Date((new Date).getTime() - (oneDay));
+    soilsCollection
+      .find( {
+          sensorID: { $in : listOfSensorIDs },
+          date: {$gte: past24Hrs}
+
+      } )
       .toArray()
       .then((result) => {
         if (result.length > 0){
-          let sum = result.map(obj => obj.magnitude).reduce((prev, next) => prev + next);
-          resolve(sum / result.length);
+          let sum = result.map(obj => obj.soilTemp.magnitude).reduce((prev, next) => prev + next);
+          let avgSoilData = {};
+           avgSoilData.avgSoilTemp = {
+            magnitude: sum / result.length,
+            units: "fahrenheit"
+          };
+          resolve(avgSoilData);
         } else{
           resolve(null);
         }
@@ -92,18 +104,18 @@ function getSoilByID(soilID, mongoDB){
       });
   });
 }
-function getAllSoils(mongoDB){
-  return new Promise((resolve, reject) => {
-    const soilCollection = mongoDB.collection('soils');
-    soilCollection.find().toArray()
-      .then((result) => {
-        resolve(result);
-      })
-      .catch((err) => {
-        reject(err);
-      });
-  });
-}
+// function getAllSoils(mongoDB){
+//   return new Promise((resolve, reject) => {
+//     const soilCollection = mongoDB.collection('soils');
+//     soilCollection.find().toArray()
+//       .then((result) => {
+//         resolve(result);
+//       })
+//       .catch((err) => {
+//         reject(err);
+//       });
+//   });
+// }
 
 /******************************************************
 *				Soils Queries
@@ -111,24 +123,24 @@ function getAllSoils(mongoDB){
 /*
  * Route to post a new soil reading
  */
- router.get('/', function(req, res, next) {
-   const mongoDB = req.app.locals.mongoDB;
-   getAllSoils(mongoDB)
-     .then((soilObject) => {
-       if(soilObject){
-         res.status(200).json(soilObject);
-       }
-       else{
-         next();
-       }
-     })
-     .catch((err) => {
-       res.status(500).json({
-         error: `Unable to fetch the soil from the database`
-       });
-     });
- });
-router.post('/', function(req, res, next) {
+ // router.get('/', function(req, res, next) {
+ //   const mongoDB = req.app.locals.mongoDB;
+ //   getAllSoils(mongoDB)
+ //     .then((soilObject) => {
+ //       if(soilObject){
+ //         res.status(200).json(soilObject);
+ //       }
+ //       else{
+ //         next();
+ //       }
+ //     })
+ //     .catch((err) => {
+ //       res.status(500).json({
+ //         error: `Unable to fetch the soil from the database`
+ //       });
+ //     });
+ // });
+router.post('/', requireAuthentication, function(req, res, next) {
   if (validation.validateAgainstSchema(req.body, soilsSchema)){
     let soilInfo = req.body;
     let sensorID = soilInfo.sensorID;
@@ -160,7 +172,7 @@ router.post('/', function(req, res, next) {
           }
         } else {
           res.status(403).json({
-            err: `User doesn't have access to sensor with id: ${sensorID}`
+            err: `User doesn't have authorization to sensor with id: ${sensorID}`
           });
         }
       })
@@ -188,7 +200,7 @@ router.post('/', function(req, res, next) {
 /*
  * Route to get a soil reading
  */
- router.get('/:soilID', function(req, res, next) {
+ router.get('/:soilID', requireAuthentication, function(req, res, next) {
    const mongoDB = req.app.locals.mongoDB;
    const soilID = req.params.soilID;
    let soilObj = {};
@@ -208,7 +220,7 @@ router.post('/', function(req, res, next) {
          res.status(200).json(soilObject);
        } else {
          res.status(403).json({
-           err: `User doesn't have access to this soil reading`
+           err: `User doesn't have authorization to this soil reading`
          });
        }
      })

@@ -24,17 +24,22 @@ const { requireAuthentication, hasAccessToFarm,
 function getAvgTempFromSensorIDs(listOfSensorIDs, mongoDB){
   return new Promise(function(resolve, reject) {
     const tempCollection = mongoDB.collection('temperatures');
-    let thePast24Hs =  new Date((new Date).getTime() - (24 * 60 * 60 * 1000));
+    const oneDay = 24 * 60 * 60 * 1000;
+    const past24Hrs =  new Date((new Date).getTime() - (oneDay));
     tempCollection
       .find( {
           sensorID: { $in : listOfSensorIDs },
-          date: {$gte: thePast24Hs}
+          date: {$gte: past24Hrs}
       } )
       .toArray()
       .then((result) => {
         if (result.length > 0){
           let sum = result.map(obj => obj.magnitude).reduce((prev, next) => prev + next);
-          resolve( (sum / result.length).toFixed(2) );
+          let avgTemp = {
+            magnitude: parseFloat((sum / result.length).toFixed(2)),
+            units: "fahrenheit"
+          };
+          resolve(avgTemp);
         } else{
           resolve(null);
         }
@@ -100,18 +105,18 @@ function getTemperatureByID(tempID, mongoDB){
       });
   });
 }
-function getAllTemps(mongoDB){
-  return new Promise((resolve, reject) => {
-    const sensorsCollection = mongoDB.collection('temperatures');
-    sensorsCollection.find().toArray()
-      .then((result) => {
-        resolve(result);
-      })
-      .catch((err) => {
-        reject(err);
-      });
-  });
-}
+// function getAllTemps(mongoDB){
+//   return new Promise((resolve, reject) => {
+//     const sensorsCollection = mongoDB.collection('temperatures');
+//     sensorsCollection.find().toArray()
+//       .then((result) => {
+//         resolve(result);
+//       })
+//       .catch((err) => {
+//         reject(err);
+//       });
+//   });
+// }
 
 /******************************************************
 *				Temperatures Queries
@@ -119,24 +124,24 @@ function getAllTemps(mongoDB){
 /*
  * Route to post a new temperature reading
  */
- router.get('/', function(req, res, next) {
-   const mongoDB = req.app.locals.mongoDB;
-   getAllTemps(mongoDB)
-     .then((tempObject) => {
-       if(tempObject){
-         res.status(200).json(tempObject);
-       }
-       else{
-         next();
-       }
-     })
-     .catch((err) => {
-       res.status(500).json({
-         error: `Unable to fetch the sensor from the database`
-       });
-     });
- });
-router.post('/', function(req, res, next) {
+ // router.get('/', function(req, res, next) {
+ //   const mongoDB = req.app.locals.mongoDB;
+ //   getAllTemps(mongoDB)
+ //     .then((tempObject) => {
+ //       if(tempObject){
+ //         res.status(200).json(tempObject);
+ //       }
+ //       else{
+ //         next();
+ //       }
+ //     })
+ //     .catch((err) => {
+ //       res.status(500).json({
+ //         error: `Unable to fetch the sensor from the database`
+ //       });
+ //     });
+ // });
+router.post('/', requireAuthentication, function(req, res, next) {
   if (validation.validateAgainstSchema(req.body, temperaturesSchema)){
     let tempInfo = req.body;
     let sensorID = tempInfo.sensorID;
@@ -168,7 +173,7 @@ router.post('/', function(req, res, next) {
           }
         } else {
           res.status(403).json({
-            err: `User doesn't have access to sensor with id: ${sensorID}`
+            err: `User doesn't have authorization to sensor with id: ${sensorID}`
           });
         }
       })
@@ -196,7 +201,7 @@ router.post('/', function(req, res, next) {
 /*
  * Route to get a temperature reading
  */
- router.get('/:tempID', function(req, res, next) {
+ router.get('/:tempID', requireAuthentication, function(req, res, next) {
    const mongoDB = req.app.locals.mongoDB;
    const tempID = req.params.tempID;
    let tempObj = {};
@@ -216,7 +221,7 @@ router.post('/', function(req, res, next) {
          res.status(200).json(tempObj);
        } else {
          res.status(403).json({
-           err: `User doesn't have access to temperature with id: ${tempID}`
+           err: `User doesn't have authorization to temperature with id: ${tempID}`
          });
        }
      })

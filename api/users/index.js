@@ -238,17 +238,9 @@ router.get('/:userName/farms', requireAuthentication, function (req, res, next) 
   else {
     getFarmsByUsername(req.username, mongoDB)
       .then((userFarms) => {
-        if(userFarms){
-          res.status(200).json({
-            farms: userFarms
-          });
-        }
-        else{
-          /* Not a valid user */
-          res.status(404).json({
-            error: "Requested resource " + req.originalUrl + " does not exist"
-          });
-        }
+        res.status(200).json({
+          farms: (userFarms || [])
+        });
       })
       .catch((err) => {
         res.status(500).json({

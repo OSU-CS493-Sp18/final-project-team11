@@ -101,33 +101,16 @@ function deleteSensor(sensorID, mongoDB){
 *				Sensors Queries
 *******************************************************/
 /*
- * Route get a sensor by ID
- */
-router.get('/', function(req, res, next) {
-  const mongoDB = req.app.locals.mongoDB;
-  getAllSensors(mongoDB)
-    .then((sensorObject) => {
-      if(sensorObject){
-        res.status(200).json(sensorObject);
-      }
-      else{
-        next();
-      }
-    })
-    .catch((err) => {
-      res.status(500).json({
-        error: `Unable to fetch the sensor from the database`
-      });
-    });
-});
-/*
  * Route to get a sensor by ID
  */
-router.get('/:sensorID', function(req, res, next) {
+router.get('/:sensorID', requireAuthentication, function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const sensorID = req.params.sensorID;
+  var sensorObj = null;
+
   getSensorByID(sensorID, mongoDB)
     .then((sensorObject) => {
+      sensorObj = (sensorObject || [])
       if(sensorObject){
         const authData = {id:sensorObject.blockID,type:"block",needsRole:USER};
         return hasAccessToFarm(authData, req.farms, mongoDB);
@@ -137,10 +120,10 @@ router.get('/:sensorID', function(req, res, next) {
     })
     .then((hasAccess) => {
       if (hasAccess){
-        res.status(200).json(sensorObject);
+        res.status(200).json(sensorObj);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to farm with id: ${farmID}`
+          err: `User doesn't have authorization to get the sensor with id: ${sensorID}`
         });
       }
     })
@@ -160,13 +143,14 @@ router.post('/', requireAuthentication, function(req, res, next) {
     const blockID = sensor.blockID;
     const mongoDB = req.app.locals.mongoDB;
     const authData = {id:blockID, type:"block",needsRole:USER};
+
     hasAccessToFarm(authData, req.farms, mongoDB)
       .then((hasAccess) => {
         if (hasAccess){
           return getBlockByID(blockID, mongoDB);
         } else {
           res.status(403).json({
-            err: `User doesn't have access to block with id: ${blockID}`
+            err: `User doesn't have authorization to post a sensor to block with id: ${blockID}`
           });
         }
       })
@@ -209,7 +193,7 @@ router.post('/', requireAuthentication, function(req, res, next) {
 /*
  * Route to update a sensor given the sensorID
  */
-router.put('/:sensorID', function(req, res, next) {
+router.put('/:sensorID', requireAuthentication, function(req, res, next) {
   if (validation.validateAgainstSchema(req.body, sensorsSchema)){
     let sensor = req.body;
     sensor.posterID = req.userID;
@@ -224,7 +208,7 @@ router.put('/:sensorID', function(req, res, next) {
           return getBlockByID(blockID, mongoDB);
         } else {
           res.status(403).json({
-            err: `User doesn't have access to block with id: ${blockID}`
+            err: `User doesn't have authorization to update the sensor with id: ${sensorID}`
           });
         }
       })
@@ -266,7 +250,7 @@ router.put('/:sensorID', function(req, res, next) {
 /*
  * Route to delete a sensor.
  */
-router.delete('/:sensorID', function(req, res, next) {
+router.delete('/:sensorID', requireAuthentication, function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const sensorID = req.params.sensorID;
   getSensorByID(sensorID, mongoDB)
@@ -283,7 +267,7 @@ router.delete('/:sensorID', function(req, res, next) {
         return deleteSensor(sensorID, mongoDB);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to sensor with id: ${sensorID}`
+          err: `User doesn't have authorization to delete the sensor with id: ${sensorID}`
         });
       }
     })
@@ -303,7 +287,7 @@ router.delete('/:sensorID', function(req, res, next) {
 /*
  * Route to get the current temperature of a sensor.
  */
-router.get('/:sensorID/temperature', function(req, res, next) {
+router.get('/:sensorID/temperature', requireAuthentication, function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const sensorID = req.params.sensorID;
   getSensorByID(sensorID, mongoDB)
@@ -320,7 +304,7 @@ router.get('/:sensorID/temperature', function(req, res, next) {
         return getSensorsLatestTemp(sensorID, mongoDB);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to sensor with id: ${sensorID}`
+          err: `User doesn't have authorization to get the temperature of sensor with id: ${sensorID}`
         });
       }
     })
@@ -336,7 +320,7 @@ router.get('/:sensorID/temperature', function(req, res, next) {
 /*
  * Route to get the current soil data of a sensor.
  */
-router.get('/:sensorID/soil', function(req, res, next) {
+router.get('/:sensorID/soil', requireAuthentication, function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const sensorID = req.params.sensorID;
   getSensorByID(sensorID, mongoDB)
@@ -353,7 +337,7 @@ router.get('/:sensorID/soil', function(req, res, next) {
         return getSensorsLatestSoilData(sensorID, mongoDB);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to sensor with id: ${sensorID}`
+          err: `User doesn't have authorization to get the soil of sensor with id: ${sensorID}`
         });
       }
     })
@@ -369,7 +353,7 @@ router.get('/:sensorID/soil', function(req, res, next) {
 /*
  * Route to get the current irrigation data of a sensor.
  */
-router.get('/:sensorID/irrigation', function(req, res, next) {
+router.get('/:sensorID/irrigation', requireAuthentication, function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const sensorID = req.params.sensorID;
   getSensorByID(sensorID, mongoDB)
@@ -386,7 +370,7 @@ router.get('/:sensorID/irrigation', function(req, res, next) {
         return getSensorsLatestIrrigationTime(sensorID, mongoDB);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to sensor with id: ${sensorID}`
+          err: `User doesn't have authorization to get the irrigation of sensor with id: ${sensorID}`
         });
       }
     })

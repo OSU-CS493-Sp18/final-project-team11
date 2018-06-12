@@ -146,7 +146,7 @@ router.get('/:farmID', requireAuthentication, function(req, res, next) {
         return getFarmByID(farmID, mongoDB);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to farm with id: ${farmID}`
+          err: `User doesn't have authorization to get the farm with id: ${farmID}`
         });
       }
     })
@@ -178,7 +178,7 @@ router.get('/:farmID/blocks', requireAuthentication, function(req, res, next) {
         return getBlocksInFarm(farmID, mongoDB);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to farm with id: ${farmID}`
+          err: `User doesn't have authorization to get the blocks from the farm with id: ${farmID}`
         });
       }
     })
@@ -248,7 +248,7 @@ router.put('/:farmID', requireAuthentication, function(req, res, next) {
           return updateFarm(farmID, farm, mongoDB);
         } else {
           res.status(403).json({
-            err: `User doesn't have access to farm with id: ${farmID}`
+            err: `User doesn't have authorization to update the farm with id: ${farmID}`
           });
         }
       })
@@ -295,7 +295,7 @@ router.delete('/:farmID', requireAuthentication, function(req, res, next) {
         return deleteFarm(farmID, mongoDB);
       } else {
         res.status(403).json({
-          err: `User doesn't have access to farm with id: ${farmID}`
+          err: `User doesn't have authorization to delete the farm with id: ${farmID}`
         });
       }
     })

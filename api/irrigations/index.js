@@ -17,15 +17,28 @@ const { requireAuthentication, hasAccessToFarm,
         SENSOR, USER, ADMIN } = require('../../lib/auth');
 
 
-function getAvgIrrigationTime(listOfIDs, mongoDB){
+function getAvgIrrigationTime(listOfSensorIDs, mongoDB){
   return new Promise(function(resolve, reject) {
+    const oneDay = 24 * 60 * 60 * 1000;
+    const days = 30;
+    const pastMonth =  new Date((new Date).getTime() - (days * oneDay));
     const irrigationsCollection = mongoDB.collection('irrigations');
-    irrigationsCollection.find( {_id : { $in : listOfIDs } } )
+    irrigationsCollection
+      .find( {
+          sensorID: { $in : listOfSensorIDs },
+          date: {$gte: pastMonth}
+
+      } )
       .toArray()
       .then((result) => {
         if (result.length > 0){
           let sum = result.map(obj => (new Date(obj.timeTurnedOff) - new Date(obj.timeTurnedOn)) ).reduce((prev, next) => prev + next);
-          resolve(sum / result.length);
+          let timeInSeconds = (sum / result.length) / 1000;
+          let avgWaterTime = {
+            magnitude: parseFloat(timeInSeconds.toFixed(2)),
+            units: "seconds"
+          };
+          resolve(avgWaterTime);
         } else{
           resolve(null);
         }
@@ -54,7 +67,7 @@ function getSensorsLatestIrrigationTime(sensorID, mongoDB){
 function insertIrrigation(irrigationDoc, mongoDB){
   return new Promise((resolve, reject) => {
     const irrigationCollection = mongoDB.collection('irrigations');
-    irrigationDoc.date = new Date().toISOString();
+    irrigationDoc.date = new Date();
     irrigationCollection.insertOne(irrigationDoc)
       .then((result) => {
         resolve(result.insertedId);
@@ -77,18 +90,19 @@ function getIrrigationByID(irrigationID, mongoDB){
       });
   });
 }
-function getAllIrrigations(mongoDB){
-  return new Promise((resolve, reject) => {
-    const irrigationCollection = mongoDB.collection('irrigations');
-    irrigationCollection.find().toArray()
-      .then((result) => {
-        resolve(result);
-      })
-      .catch((err) => {
-        reject(err);
-      });
-  });
-}
+// function getAllIrrigations(mongoDB){
+//   return new Promise((resolve, reject) => {
+//     const irrigationCollection = mongoDB.collection('irrigations');
+//     irrigationCollection.find().toArray()
+//       .then((result) => {
+//         resolve(result);
+//       })
+//       .catch((err) => {
+//         reject(err);
+//       });
+//   });
+// }
+
 
 /******************************************************
 *				Irrigations Queries
@@ -96,24 +110,24 @@ function getAllIrrigations(mongoDB){
 /*
  * Route to post a new irrigation reading
  */
- router.get('/', function(req, res, next) {
-   const mongoDB = req.app.locals.mongoDB;
-   getAllIrrigations(mongoDB)
-     .then((irrigationObject) => {
-       if(irrigationObject){
-         res.status(200).json(irrigationObject);
-       }
-       else{
-         next();
-       }
-     })
-     .catch((err) => {
-       res.status(500).json({
-         error: `Unable to fetch the irrigation from the database`
-       });
-     });
- });
-router.post('/', function(req, res, next) {
+ // router.get('/', function(req, res, next) {
+ //   const mongoDB = req.app.locals.mongoDB;
+ //   getAllIrrigations(mongoDB)
+ //     .then((irrigationObject) => {
+ //       if(irrigationObject){
+ //         res.status(200).json(irrigationObject);
+ //       }
+ //       else{
+ //         next();
+ //       }
+ //     })
+ //     .catch((err) => {
+ //       res.status(500).json({
+ //         error: `Unable to fetch the irrigation from the database`
+ //       });
+ //     });
+ // });
+router.post('/', requireAuthentication, function(req, res, next) {
   if (validation.validateAgainstSchema(req.body, irrigationsSchema)){
     let irrigationInfo = req.body;
     let sensorID = irrigationInfo.sensorID;
@@ -145,7 +159,7 @@ router.post('/', function(req, res, next) {
           }
         } else {
           res.status(403).json({
-            err: `User doesn't have access to sensor with id: ${sensorID}`
+            err: `User doesn't have authorization to post an irrigation as sensor with id: ${sensorID}`
           });
         }
       })
@@ -173,7 +187,7 @@ router.post('/', function(req, res, next) {
 /*
  * Route to get a irrigation reading
  */
- router.get('/:irrigationID', function(req, res, next) {
+ router.get('/:irrigationID', requireAuthentication, function(req, res, next) {
    const mongoDB = req.app.locals.mongoDB;
    const irrigationID = req.params.irrigationID;
    let irrigationObj = {};
@@ -190,10 +204,10 @@ router.post('/', function(req, res, next) {
      })
      .then((hasAccess) => {
        if (hasAccess){
-         res.status(200).json(irrigationObject);
+         res.status(200).json(irrigationObj);
        } else {
          res.status(403).json({
-           err: `User doesn't have access to this irrigation reading`
+           err: `User doesn't have authorization to this irrigation reading`
          });
        }
      })
