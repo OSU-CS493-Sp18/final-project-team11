@@ -4,10 +4,10 @@ case "$choice" in
   y|Y )
     echo "yes";
     docker container stop smart-farm-api;
-    docker container stop db_mongo;
+    docker container stop db_mongo_smart-farm;
 
     docker rm smart-farm-api;
-    docker rm db_mongo;
+    docker rm db_mongo_smart-farm;
 
     yes | docker volume prune;;
 

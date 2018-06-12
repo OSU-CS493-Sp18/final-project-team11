@@ -1,20 +1,22 @@
 const router = require('express').Router();
+/* Get Temperatures Schema */
+const Ajv = require('ajv');
+const ajv = Ajv({allErrors: true});
+const schemas = require('../../lib/schemas');
+const temperaturesSchema = ajv.compile(schemas.temperaturesSchema);
+
 exports.router = router;
 exports.getAvgTempFromSensorIDs = getAvgTempFromSensorIDs;
 exports.getSensorsLatestTemp = getSensorsLatestTemp;
+exports.getTemperatureByID = getTemperatureByID;
 
 const validation = require('../../lib/validation');
 const { generateMongoIDQuery } = require('../../lib/mongoHelpers');
-const { verifyValidSensorID } = require('../sensors');
-/*
- * Schema describing required/optional fields of a business object.
- */
-const temperaturesSchema = {
-  sensorID: {required: true},
-  magnitude: {required: true},
-  units: {required: true},
-  date: {required: false}
-};
+const { getSensorByID } = require('../sensors');
+const { requireAuthentication, hasAccessToFarm,
+        SENSOR, USER, ADMIN } = require('../../lib/auth');
+
+
 
 
 
@@ -136,24 +138,38 @@ function getAllTemps(mongoDB){
  });
 router.post('/', function(req, res, next) {
   if (validation.validateAgainstSchema(req.body, temperaturesSchema)){
-    let tempInfo = validation.extractValidFields(req.body, temperaturesSchema);
+    let tempInfo = req.body;
     let sensorID = tempInfo.sensorID;
     const mongoDB = req.app.locals.mongoDB;
-    verifyValidSensorID(sensorID, mongoDB)
-      .then((sensorObj) => {
-        /* if the sensor is NOT a valid sensor */
-        if(!sensorObj){
-          res.status(400).json({
-            err: `Request body's sensorID ${sensorID} is not a valid sensor`
+    let sensorObj = {};
+
+    getSensorByID(sensorID, mongoDB)
+      .then((sensorObject) => {
+        if (sensorObject){
+          sensorObj = sensorObject;
+          const authData = {id:sensorObject.blockID,type:"block",needsRole:SENSOR};
+          return hasAccessToFarm(authData, req.farms, mongoDB);
+        } else {
+            res.status(400).json({
+              err: `Request body's sensorID ${sensorID} is not a valid sensor`
+            });
+          }
+      })
+      .then((hasAccess) => {
+        if (hasAccess){
+          /* if the sensor is NOT a temperature sensor */
+          if (sensorObj.type != "temperature"){
+            res.status(400).json({
+              err: `Request body's sensorID does not represent a temperature sensor`
+            });
+          }/* all good */
+          else{
+              return insertTemperature(tempInfo, mongoDB);
+          }
+        } else {
+          res.status(403).json({
+            err: `User doesn't have access to sensor with id: ${sensorID}`
           });
-        }/* if the sensor is NOT a temperature sensor */
-        else if (sensorObj.type != "temperature"){
-          res.status(400).json({
-            err: `Request body's sensorID does not represent a temperature sensor`
-          });
-        }/* all good */
-        else{
-            return insertTemperature(tempInfo, mongoDB);
         }
       })
       .then((insertId) => {
@@ -183,12 +199,25 @@ router.post('/', function(req, res, next) {
  router.get('/:tempID', function(req, res, next) {
    const mongoDB = req.app.locals.mongoDB;
    const tempID = req.params.tempID;
+   let tempObj = {};
+
    getTemperatureByID(tempID, mongoDB)
      .then((tempObject) => {
        if(tempObject){
-         res.status(200).json(tempObject);
+         tempObj = tempObject;
+         const authData = {id:sensorObject.blockID,type:"block",needsRole:USER};
+         return hasAccessToFarm(authData, req.farms, mongoDB);
        } else {
            next();
+       }
+     })
+     .then((hasAccess) => {
+       if (hasAccess){
+         res.status(200).json(tempObj);
+       } else {
+         res.status(403).json({
+           err: `User doesn't have access to temperature with id: ${tempID}`
+         });
        }
      })
      .catch((err) => {
@@ -197,53 +226,3 @@ router.post('/', function(req, res, next) {
        });
      });
  });
-
- // router.put('/:tempID', function(req, res, next) {
- //   if (validation.validateAgainstSchema(req.body, temperaturesSchema)){
- //     let tempInfo = validation.extractValidFields(req.body, temperaturesSchema);
- //     let sensorID = tempInfo.sensorID;
- //     const tempID = req.params.tempID;
- //     const mongoDB = req.app.locals.mongoDB;
- //     verifyValidSensorID(sensorID, mongoDB)
- //       .then((sensorObj) => {
- //         /* if the sensor is NOT a valid sensor */
- //         if(!sensorObj){
- //           res.status(400).json({
- //             err: `Request body's sensorID ${sensorID} is not a valid sensor`
- //           });
- //         }/* if the sensor is NOT a temperature sensor */
- //         else if (sensorObj.type != "temperature"){
- //           res.status(400).json({
- //             err: `Request body's sensorID does not represent a temperature sensor`
- //           });
- //         }/* all good */
- //         else{
- //             return updateTemperature(tempID, tempInfo, mongoDB);
- //         }
- //       })
- //       .then((numUpdated) => {
- //         /* if valid tempID, numUpdated == 1 */
- //         if (numUpdated){
- //           res.status(200).json({
- //             id: tempID,
- //             /* Generate HATEOAS links for surrounding pages.*/
- //             links: {
- //               block: `/temperatures/${tempID}`
- //             }
- //           });
- //         } else{
- //           next();
- //         }
- //       })
- //       .catch((err) => {
- //         res.status(500).json({
- //           err: `Unable to insert the temperature into the database`
- //         });
- //       });
- //   }
- //   else{
- //       res.status(400).json({
- //         err: `Request body is not a valid sensor object`
- //       });
- //     }
- // });

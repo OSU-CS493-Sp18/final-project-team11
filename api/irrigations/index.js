@@ -1,14 +1,14 @@
 const router = require('express').Router();
-/* Get Soils Schema */
+/* Get Irrigations Schema */
 const Ajv = require('ajv');
 const ajv = Ajv({allErrors: true});
 const schemas = require('../../lib/schemas');
-const soilsSchema = ajv.compile(schemas.soilsSchema);
+const irrigationsSchema = ajv.compile(schemas.irrigationsSchema);
 
 exports.router = router;
-exports.getAvgSoilData = getAvgSoilData
-exports.getSensorsLatestSoilData = getSensorsLatestSoilData
-exports.getSoilByID = getSoilByID;
+exports.getAvgIrrigationTime = getAvgIrrigationTime
+exports.getSensorsLatestIrrigationTime = getSensorsLatestIrrigationTime
+exports.getIrrigationByID = getIrrigationByID;
 
 const validation = require('../../lib/validation');
 const { generateMongoIDQuery } = require('../../lib/mongoHelpers')
@@ -17,15 +17,14 @@ const { requireAuthentication, hasAccessToFarm,
         SENSOR, USER, ADMIN } = require('../../lib/auth');
 
 
-
-function getAvgSoilData(listOfIDs, mongoDB){
+function getAvgIrrigationTime(listOfIDs, mongoDB){
   return new Promise(function(resolve, reject) {
-    const soilsCollection = mongoDB.collection('soils');
-    soilsCollection.find( {_id : { $in : listOfIDs } } )
+    const irrigationsCollection = mongoDB.collection('irrigations');
+    irrigationsCollection.find( {_id : { $in : listOfIDs } } )
       .toArray()
       .then((result) => {
         if (result.length > 0){
-          let sum = result.map(obj => obj.magnitude).reduce((prev, next) => prev + next);
+          let sum = result.map(obj => (new Date(obj.timeTurnedOff) - new Date(obj.timeTurnedOn)) ).reduce((prev, next) => prev + next);
           resolve(sum / result.length);
         } else{
           resolve(null);
@@ -36,11 +35,11 @@ function getAvgSoilData(listOfIDs, mongoDB){
       });
   });
 }
-function getSensorsLatestSoilData(sensorID, mongoDB){
+function getSensorsLatestIrrigationTime(sensorID, mongoDB){
   return new Promise(function(resolve, reject) {
-    const soilCollection = mongoDB.collection('soils');
+    const irrigationCollection = mongoDB.collection('irrigations');
     /* get the most recent record from this sensor */
-    soilCollection
+    irrigationCollection
     .find({sensorID: sensorID})
     .limit(1).sort({$natural:-1})
     .toArray()
@@ -52,11 +51,11 @@ function getSensorsLatestSoilData(sensorID, mongoDB){
       });
   });
 }
-function insertSoil(soilDoc, mongoDB){
+function insertIrrigation(irrigationDoc, mongoDB){
   return new Promise((resolve, reject) => {
-    const soilCollection = mongoDB.collection('soils');
-    soilDoc.date = new Date();
-    soilCollection.insertOne(soilDoc)
+    const irrigationCollection = mongoDB.collection('irrigations');
+    irrigationDoc.date = new Date().toISOString();
+    irrigationCollection.insertOne(irrigationDoc)
       .then((result) => {
         resolve(result.insertedId);
       })
@@ -65,25 +64,11 @@ function insertSoil(soilDoc, mongoDB){
       });
   });
 }
-function updateSoil(soilID, soilDoc, mongoDB){
+function getIrrigationByID(irrigationID, mongoDB){
   return new Promise(function(resolve, reject) {
-    const soilCollection = mongoDB.collection('soils');
-    const _idobj = generateMongoIDQuery(soilID);
-    soilDoc.date = new Date();
-    soilCollection.updateOne(_idobj, { $set: soilDoc })
-      .then((updated) => {
-        resolve(updated.result.n > 0);
-      })
-      .catch((err) => {
-        reject(err);
-      });
-  });
-}
-function getSoilByID(soilID, mongoDB){
-  return new Promise(function(resolve, reject) {
-    const soilCollection = mongoDB.collection('soils');
-    const _idobj = generateMongoIDQuery(soilID);
-    soilCollection.findOne(_idobj)
+    const irrigationCollection = mongoDB.collection('irrigations');
+    const _idobj = generateMongoIDQuery(irrigationID);
+    irrigationCollection.findOne(_idobj)
       .then((result) => {
         resolve(result);
       })
@@ -92,10 +77,10 @@ function getSoilByID(soilID, mongoDB){
       });
   });
 }
-function getAllSoils(mongoDB){
+function getAllIrrigations(mongoDB){
   return new Promise((resolve, reject) => {
-    const soilCollection = mongoDB.collection('soils');
-    soilCollection.find().toArray()
+    const irrigationCollection = mongoDB.collection('irrigations');
+    irrigationCollection.find().toArray()
       .then((result) => {
         resolve(result);
       })
@@ -106,17 +91,17 @@ function getAllSoils(mongoDB){
 }
 
 /******************************************************
-*				Soils Queries
+*				Irrigations Queries
 *******************************************************/
 /*
- * Route to post a new soil reading
+ * Route to post a new irrigation reading
  */
  router.get('/', function(req, res, next) {
    const mongoDB = req.app.locals.mongoDB;
-   getAllSoils(mongoDB)
-     .then((soilObject) => {
-       if(soilObject){
-         res.status(200).json(soilObject);
+   getAllIrrigations(mongoDB)
+     .then((irrigationObject) => {
+       if(irrigationObject){
+         res.status(200).json(irrigationObject);
        }
        else{
          next();
@@ -124,14 +109,14 @@ function getAllSoils(mongoDB){
      })
      .catch((err) => {
        res.status(500).json({
-         error: `Unable to fetch the soil from the database`
+         error: `Unable to fetch the irrigation from the database`
        });
      });
  });
 router.post('/', function(req, res, next) {
-  if (validation.validateAgainstSchema(req.body, soilsSchema)){
-    let soilInfo = req.body;
-    let sensorID = soilInfo.sensorID;
+  if (validation.validateAgainstSchema(req.body, irrigationsSchema)){
+    let irrigationInfo = req.body;
+    let sensorID = irrigationInfo.sensorID;
     const mongoDB = req.app.locals.mongoDB;
     let sensorObj = {};
 
@@ -149,14 +134,14 @@ router.post('/', function(req, res, next) {
       })
       .then((hasAccess) => {
         if (hasAccess){
-          /* if the sensor is NOT a soil sensor */
-          if (sensorObj.type != "soil"){
+          /* if the sensor is NOT a irrigation sensor */
+          if (sensorObj.type != "irrigation"){
             res.status(400).json({
-              err: `Request body's sensorID does not represent a soil sensor`
+              err: `Request body's sensorID does not represent a irrigation sensor`
             });
           }/* all good */
           else{
-              return insertSoil(soilInfo, mongoDB);
+              return insertIrrigation(irrigationInfo, mongoDB);
           }
         } else {
           res.status(403).json({
@@ -169,13 +154,13 @@ router.post('/', function(req, res, next) {
           id: insertId,
           /* Generate HATEOAS links for surrounding pages.*/
           links: {
-            sensor: `/soils/${insertId}`
+            sensor: `/irrigations/${insertId}`
           }
         });
       })
       .catch((err) => {
         res.status(500).json({
-          err: `Unable to insert the soil into the database`
+          err: `Unable to insert the irrigation into the database`
         });
       });
   }
@@ -186,18 +171,18 @@ router.post('/', function(req, res, next) {
     }
 });
 /*
- * Route to get a soil reading
+ * Route to get a irrigation reading
  */
- router.get('/:soilID', function(req, res, next) {
+ router.get('/:irrigationID', function(req, res, next) {
    const mongoDB = req.app.locals.mongoDB;
-   const soilID = req.params.soilID;
-   let soilObj = {};
+   const irrigationID = req.params.irrigationID;
+   let irrigationObj = {};
 
-   getSoilByID(soilID, mongoDB)
-     .then((soilObject) => {
-       if(soilObject){
-         soilObj = soilObject;
-         const authData = {id:soilObj.sensorID,type:"sensor",needsRole:USER};
+   getIrrigationByID(irrigationID, mongoDB)
+     .then((irrigationObject) => {
+       if(irrigationObject){
+         irrigationObj = irrigationObject;
+         const authData = {id:irrigationObj.sensorID,type:"sensor",needsRole:USER};
          return hasAccessToFarm(authData, req.farms, mongoDB);
        } else {
            next();
@@ -205,16 +190,16 @@ router.post('/', function(req, res, next) {
      })
      .then((hasAccess) => {
        if (hasAccess){
-         res.status(200).json(soilObject);
+         res.status(200).json(irrigationObject);
        } else {
          res.status(403).json({
-           err: `User doesn't have access to this soil reading`
+           err: `User doesn't have access to this irrigation reading`
          });
        }
      })
      .catch((err) => {
        res.status(500).json({
-         error: `Unable to fetch the soil from the database`
+         error: `Unable to fetch the irrigation from the database`
        });
      });
  });

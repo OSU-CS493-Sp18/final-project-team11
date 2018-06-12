@@ -1,24 +1,19 @@
 const router = require('express').Router();
+/* Get Farms Schema */
+const Ajv = require('ajv');
+const ajv = Ajv({allErrors: true});
+const schemas = require('../../lib/schemas');
+const newUserSchema = ajv.compile(schemas.newUserSchema);
+const loginUserSchema = ajv.compile(schemas.loginUserSchema);
+
 exports.router = router;
 
 const bcrypt = require('bcryptjs');
 const validation = require('../../lib/validation');
-const { getFarmsByUserID } = require('../farms');
-const { generateAuthToken, requireAuthentication } = require('../../lib/auth');
+const { getFarmsByUsername } = require('../farms');
+const { generateAuthToken, requireAuthentication,
+        SENSOR, USER, ADMIN } = require('../../lib/auth');
 
-/*
- * Schema describing required/optional fields of a review object.
- */
-const newUserSchema = {
-  username: { required: true },
-  email: { required: true },
-  password: { required: true },
-  privileges: {required: true}
-};
-const loginUserSchema = {
-  username: { required: true},
-  password: { required: true}
-}
 
 
 
@@ -92,7 +87,8 @@ function deleteUserByUserName(userName, mongoDB){
 router.post('/', function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   if (validation.validateAgainstSchema(req.body, newUserSchema)) {
-    let clientData = validation.extractValidFields(req.body, newUserSchema);
+    let clientData = req.body;
+    clientData.authFarms = [];
     getUserByUserName(clientData.username, mongoDB)
       .then((isNotUnique) => {
         if(isNotUnique){
@@ -131,7 +127,7 @@ router.post('/', function(req, res, next) {
 router.post('/login', function (req, res) {
   const mongoDB = req.app.locals.mongoDB;
   if (validation.validateAgainstSchema(req.body, loginUserSchema)) {
-    let clientData = validation.extractValidFields(req.body, loginUserSchema);
+    let clientData = req.body;
     let userObj = {};
     getUserByUserName(clientData.username, mongoDB, true)
       .then((user) => {
@@ -144,7 +140,7 @@ router.post('/login', function (req, res) {
       })
       .then((loginSuccessful) => {
         if (loginSuccessful) {
-          return generateAuthToken(userObj.username, userObj._id, userObj.privileges);
+          return generateAuthToken(userObj.username, userObj._id, userObj.authFarms);
         } else {
           return Promise.reject(401);
         }
@@ -175,7 +171,7 @@ router.post('/login', function (req, res) {
 /*
  * Route to get the users data.
  */
-router.get('/:userName', requireAuthentication(), function (req, res, next) {
+router.get('/:userName', requireAuthentication, function (req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const userName = req.params.userName;
   if (req.username !== userName) {
@@ -203,7 +199,7 @@ router.get('/:userName', requireAuthentication(), function (req, res, next) {
 /*
  * Route to delete a user.
  */
-router.delete('/:userName', requireAuthentication(), function (req, res, next) {
+router.delete('/:userName', requireAuthentication, function (req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const userName = req.params.userName;
   if (req.username !== userName) {
@@ -231,7 +227,7 @@ router.delete('/:userName', requireAuthentication(), function (req, res, next) {
 /*
  * Route to list all of a user's farms.
  */
-router.get('/:userName/farms', requireAuthentication(), function (req, res, next) {
+router.get('/:userName/farms', requireAuthentication, function (req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const userName = req.params.userName;
   if (req.username !== userName) {
@@ -240,7 +236,7 @@ router.get('/:userName/farms', requireAuthentication(), function (req, res, next
       });
   }
   else {
-    getFarmsByUserID(req.userID, mongoDB)
+    getFarmsByUsername(req.username, mongoDB)
       .then((userFarms) => {
         if(userFarms){
           res.status(200).json({

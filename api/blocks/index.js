@@ -1,37 +1,27 @@
 const router = require('express').Router();
+/* Get Blocks Schema */
+const Ajv = require('ajv');
+const ajv = Ajv({allErrors: true});
+const schemas = require('../../lib/schemas');
+const blocksSchema = ajv.compile(schemas.blocksSchema);
+
 exports.router = router;
-exports.verifyValidBlockID = verifyValidBlockID;
+exports.getBlockByID = getBlockByID;
+exports.getBlocksInFarm = getBlocksInFarm;
 
 const validation = require('../../lib/validation');
 const { generateMongoIDQuery } = require('../../lib/mongoHelpers');
-const { verifyValidFarmID } = require('../farms');
+const { getFarmByID } = require('../farms');
 const { getSensorsInBlock } = require('../sensors');
 const { getAvgSoilData } = require('../soils');
+const { getAvgIrrigationTime } = require('../irrigations');
 const { getAvgTempFromSensorIDs } = require('../temperatures');
+const { requireAuthentication, hasAccessToFarm,
+        SENSOR, USER, ADMIN } = require('../../lib/auth');
 
 
-/*
- * Schema describing required/optional fields of a block object.
- */
-const blocksSchema = {
-  name: {required: true},
-  farmID: {required: true},
-};
 
 
-function verifyValidBlockID(blockID, mongoDB){
-  return new Promise((resolve, reject) => {
-    const blocksCollection = mongoDB.collection('blocks');
-    const _idobj = generateMongoIDQuery(blockID);
-    blocksCollection.findOne(_idobj)
-      .then((result) => {
-        resolve(result);
-      })
-      .catch((err) =>{
-        reject(err);
-      });
-  });
-}
 function insertBlock(blockDoc, mongoDB){
   return new Promise((resolve, reject) => {
     const blocksCollection = mongoDB.collection('blocks');
@@ -84,10 +74,10 @@ function deleteBlock(blockID, mongoDB){
       });
   });
 }
-function getAllBlocks(mongoDB){
+function getBlocksInFarm(farmID, mongoDB){
   return new Promise((resolve, reject) => {
     const blocksCollection = mongoDB.collection('blocks');
-    blocksCollection.find().toArray()
+    blocksCollection.find( {farmID: farmID} ).toArray()
       .then((result) => {
         resolve(result);
       })
@@ -123,9 +113,9 @@ function getPageSensors(reqPage, sensorsLength){
 /*
  * Route to get a block by ID
  * returns block object, all sensor IDs in that block,
- *  current average air temperature, and soil data
+ *  current average air temperature, soil data, and irrigation data
  */
-router.get('/:blockID', function(req, res, next) {
+router.get('/:blockID', requireAuthentication, function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const blockID = req.params.blockID;
   let retObj = {};
@@ -137,13 +127,23 @@ router.get('/:blockID', function(req, res, next) {
     .then((blockObject) => {
       if(blockObject){
         retObj = blockObject;
-        return getSensorsInBlock(blockID, mongoDB);
+        const authData = {id:blockObject.farmID,type:"farm",needsRole:USER};
+        return hasAccessToFarm(authData, req.farms, mongoDB);
       } else {
           next();
       }
     })
+    .then((hasAccess) => {
+      if (hasAccess){
+        return getSensorsInBlock(blockID, mongoDB);
+      } else {
+        res.status(403).json({
+          err: `User doesn't have access to block with id: ${blockID}`
+        });
+      }
+    })
      .then((sensorsInBlock) => {
-       allSensorsInBlock = sensorsInBlock
+       allSensorsInBlock = (sensorsInBlock || [])
        let {
          start,
          end,
@@ -196,10 +196,25 @@ router.get('/:blockID', function(req, res, next) {
       if (avgSoilData != null){
         retObj.avgSoilData = avgSoilData;
       }
+      /* extract ids of irrigation data from sensors */
+      let irriSensorIDs = allSensorsInBlock.map(obj => {
+        if(obj.type === "irrigation"){
+          return obj._id.toString();
+        }
+      });
+      if (irriSensorIDs.length > 0) {
+        return getAvgIrrigationTime(irriSensorIDs, mongoDB);
+      } else {
+        return Promise.resolve(null);
+      }
+    })
+    .then((avgWaterTime) => {
+      if (avgWaterTime != null){
+        retObj.avgWaterTime = avgWaterTime;
+      }
       res.status(200).json(retObj);
     })
     .catch((err) => {
-      console.log(err);
       res.status(500).json({
         error: `Unable to fetch the block from the database`
       });
@@ -208,12 +223,24 @@ router.get('/:blockID', function(req, res, next) {
 /*
  * Route to post a new block
  */
-router.post('/', function(req, res, next) {
+router.post('/', requireAuthentication, function(req, res, next) {
   if (validation.validateAgainstSchema(req.body, blocksSchema)){
-    let block = validation.extractValidFields(req.body, blocksSchema);
+    let block = req.body;
+    block.posterID = req.userID;
     const farmID = block.farmID;
     const mongoDB = req.app.locals.mongoDB;
-    verifyValidFarmID(farmID, mongoDB)
+    const authData = {id:farmID,type:"farm",needsRole:USER};
+
+    hasAccessToFarm(authData, req.farms, mongoDB, true)
+      .then((hasAccess) => {
+        if (hasAccess){
+          return getFarmByID(farmID, mongoDB);
+        } else {
+          res.status(403).json({
+            err: `User doesn't have access to farm with id: ${farmID}`
+          });
+        }
+      })
       .then((isValid) => {
         if(isValid){
           return insertBlock(block, mongoDB);
@@ -247,12 +274,24 @@ router.post('/', function(req, res, next) {
 /*
  * Route to update a block given the blockID
  */
-router.put('/:blockID', function(req, res, next) {
+router.put('/:blockID', requireAuthentication, function(req, res, next) {
   if (validation.validateAgainstSchema(req.body, blocksSchema)){
-    let block = validation.extractValidFields(req.body, blocksSchema);
+    let block = req.body;
+    block.posterID = req.userID;
     const blockID = req.params.blockID;
     const mongoDB = req.app.locals.mongoDB;
-    verifyValidFarmID(block.farmID, mongoDB)
+    const authData = {id:block.farmID,type:"farm",needsRole:USER};
+
+    hasAccessToFarm(authData, req.farms, mongoDB)
+      .then((hasAccess) => {
+        if (hasAccess){
+          return getFarmByID(block.farmID, mongoDB)
+        } else {
+          res.status(403).json({
+            err: `User doesn't have access to block with id: ${blockID}`
+          });
+        }
+      })
       .then((isValid) => {
         if(isValid){
           return updateBlock(blockID, block, mongoDB);
@@ -262,6 +301,7 @@ router.put('/:blockID', function(req, res, next) {
           });
         }
       })
+
       .then((numUpdated) => {
         /* if valid blockID, numUpdated == 1 */
         if (numUpdated){
@@ -291,10 +331,20 @@ router.put('/:blockID', function(req, res, next) {
 /*
  * Route to delete a block.
  */
-router.delete('/:blockID', function(req, res, next) {
+router.delete('/:blockID', requireAuthentication, function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const blockID = req.params.blockID;
-  deleteBlock(blockID, mongoDB)
+  const authData = {id:blockID,type:"block",needsRole:ADMIN};
+  hasAccessToFarm(authData, req.farms, mongoDB)
+    .then((hasAccess) => {
+      if (hasAccess){
+        return deleteBlock(blockID, mongoDB)
+      } else {
+        res.status(403).json({
+          err: `User doesn't have access to block with id: ${blockID}`
+        });
+      }
+    })
     .then((deleteSuccessful) => {
       if (deleteSuccessful) {
         res.status(204).send();

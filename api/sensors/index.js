@@ -1,44 +1,35 @@
 const router = require('express').Router();
+/* Get Sensors Schema */
+const Ajv = require('ajv');
+const ajv = Ajv({allErrors: true});
+const schemas = require('../../lib/schemas');
+const sensorsSchema = ajv.compile(schemas.sensorsSchema);
+
 exports.router = router;
 exports.getSensorsInBlock = getSensorsInBlock;
-exports.verifyValidSensorID = verifyValidSensorID;
+exports.getSensorByID = getSensorByID;
 
 const validation = require('../../lib/validation');
 const { generateMongoIDQuery } = require('../../lib/mongoHelpers');
 const { getSensorsLatestTemp } = require('../temperatures');
 const { getSensorsLatestSoilData } = require('../soils');
-const { verifyValidBlockID } = require('../blocks');
+const { getSensorsLatestIrrigationTime } = require('../soils');
+const { getBlockByID } = require('../blocks');
+const { requireAuthentication, hasAccessToFarm,
+        SENSOR, USER, ADMIN } = require('../../lib/auth');
 
 
-/*
- * Schema describing required/optional fields of a business object.
- */
-const sensorsSchema = {
-  blockID: {required: true},
-  type: {required: true},
-  location: {required: true}
-};
+
+
 /*
 * The type of sensors a sensor can be
 */
 const sensorTypes = [
   "temperature",
-  "soil"
+  "soil",
+  "irrigation"
 ];
 
-function verifyValidSensorID(sensorID, mongoDB){
-  return new Promise((resolve, reject) => {
-    const sensorsCollection = mongoDB.collection('sensors');
-    const _idobj = generateMongoIDQuery(sensorID);
-    sensorsCollection.findOne(_idobj)
-      .then((result) => {
-        resolve(result);
-      })
-      .catch((err) =>{
-        reject(err);
-      });
-  });
-}
 function getSensorsInBlock(blockID, mongoDB){
   return new Promise(function(resolve, reject) {
     const sensorsCollection = mongoDB.collection('sensors');
@@ -105,18 +96,7 @@ function deleteSensor(sensorID, mongoDB){
       });
   });
 }
-function getAllSensors(mongoDB){
-  return new Promise((resolve, reject) => {
-    const sensorsCollection = mongoDB.collection('sensors');
-    sensorsCollection.find().toArray()
-      .then((result) => {
-        resolve(result);
-      })
-      .catch((err) => {
-        reject(err);
-      });
-  });
-}
+
 /******************************************************
 *				Sensors Queries
 *******************************************************/
@@ -149,9 +129,19 @@ router.get('/:sensorID', function(req, res, next) {
   getSensorByID(sensorID, mongoDB)
     .then((sensorObject) => {
       if(sensorObject){
-        res.status(200).json(sensorObject);
+        const authData = {id:sensorObject.blockID,type:"block",needsRole:USER};
+        return hasAccessToFarm(authData, req.farms, mongoDB);
       } else {
           next();
+      }
+    })
+    .then((hasAccess) => {
+      if (hasAccess){
+        res.status(200).json(sensorObject);
+      } else {
+        res.status(403).json({
+          err: `User doesn't have access to farm with id: ${farmID}`
+        });
       }
     })
     .catch((err) => {
@@ -163,12 +153,23 @@ router.get('/:sensorID', function(req, res, next) {
 /*
  * Route to post a new sensor
  */
-router.post('/', function(req, res, next) {
-  if (validation.validateAgainstSchema(req.body, sensorsSchema) && sensorTypes.indexOf(req.body.type) > -1){
-    let sensor = validation.extractValidFields(req.body, sensorsSchema);
+router.post('/', requireAuthentication, function(req, res, next) {
+  if (validation.validateAgainstSchema(req.body, sensorsSchema)){
+    let sensor = req.body;
+    sensor.posterID = req.userID;
     const blockID = sensor.blockID;
     const mongoDB = req.app.locals.mongoDB;
-    verifyValidBlockID(blockID, mongoDB)
+    const authData = {id:blockID, type:"block",needsRole:USER};
+    hasAccessToFarm(authData, req.farms, mongoDB)
+      .then((hasAccess) => {
+        if (hasAccess){
+          return getBlockByID(blockID, mongoDB);
+        } else {
+          res.status(403).json({
+            err: `User doesn't have access to block with id: ${blockID}`
+          });
+        }
+      })
       .then((isValid) => {
         if(isValid){
           return insertSensor(sensor, mongoDB);
@@ -210,11 +211,23 @@ router.post('/', function(req, res, next) {
  */
 router.put('/:sensorID', function(req, res, next) {
   if (validation.validateAgainstSchema(req.body, sensorsSchema)){
-    let sensor = validation.extractValidFields(req.body, sensorsSchema);
+    let sensor = req.body;
+    sensor.posterID = req.userID;
     const blockID = sensor.blockID;
     const sensorID = req.params.sensorID;
     const mongoDB = req.app.locals.mongoDB;
-    verifyValidBlockID(blockID, mongoDB)
+    const authData = {id:blockID, type:"block",needsRole:USER}
+
+    hasAccessToFarm(authData, req.farms, mongoDB)
+      .then((hasAccess) => {
+        if (hasAccess){
+          return getBlockByID(blockID, mongoDB);
+        } else {
+          res.status(403).json({
+            err: `User doesn't have access to block with id: ${blockID}`
+          });
+        }
+      })
       .then((isValid) => {
         if(isValid){
           return updateSensor(sensorID, sensor, mongoDB);
@@ -256,7 +269,24 @@ router.put('/:sensorID', function(req, res, next) {
 router.delete('/:sensorID', function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const sensorID = req.params.sensorID;
-  deleteSensor(sensorID, mongoDB)
+  getSensorByID(sensorID, mongoDB)
+    .then((sensorObject) => {
+      if(sensorObject){
+        const authData = {id:sensorObject.blockID, type:"block",needsRole:USER}
+        return hasAccessToFarm(authData, req.farms, mongoDB);
+      } else {
+          next();
+      }
+    })
+    .then((hasAccess) => {
+      if (hasAccess){
+        return deleteSensor(sensorID, mongoDB);
+      } else {
+        res.status(403).json({
+          err: `User doesn't have access to sensor with id: ${sensorID}`
+        });
+      }
+    })
     .then((deleteSuccessful) => {
       if (deleteSuccessful) {
         res.status(204).send();
@@ -276,12 +306,22 @@ router.delete('/:sensorID', function(req, res, next) {
 router.get('/:sensorID/temperature', function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const sensorID = req.params.sensorID;
-  verifyValidSensorID(sensorID, mongoDB)
+  getSensorByID(sensorID, mongoDB)
     .then((sensorObj) => {
       if (sensorObj){
-        return getSensorsLatestTemp(sensorID, mongoDB);
+        const authData = {id:sensorObject.blockID, type:"block",needsRole:SENSOR};
+        return hasAccessToFarm(authData, req.farms, mongoDB);
       } else {
           next();
+      }
+    })
+    .then((hasAccess) => {
+      if (hasAccess){
+        return getSensorsLatestTemp(sensorID, mongoDB);
+      } else {
+        res.status(403).json({
+          err: `User doesn't have access to sensor with id: ${sensorID}`
+        });
       }
     })
     .then((latestRecord) => {
@@ -299,12 +339,55 @@ router.get('/:sensorID/temperature', function(req, res, next) {
 router.get('/:sensorID/soil', function(req, res, next) {
   const mongoDB = req.app.locals.mongoDB;
   const sensorID = req.params.sensorID;
-  verifyValidSensorID(sensorID, mongoDB)
+  getSensorByID(sensorID, mongoDB)
     .then((sensorObj) => {
       if (sensorObj){
-        return getSensorsLatestSoilData(sensorID, mongoDB);
+        const authData = {id:sensorObject.blockID, type:"block",needsRole:SENSOR};
+        return hasAccessToFarm(authData, req.farms, mongoDB);
       } else {
           next();
+      }
+    })
+    .then((hasAccess) => {
+      if (hasAccess){
+        return getSensorsLatestSoilData(sensorID, mongoDB);
+      } else {
+        res.status(403).json({
+          err: `User doesn't have access to sensor with id: ${sensorID}`
+        });
+      }
+    })
+    .then((latestRecord) => {
+      res.status(200).json(latestRecord);
+    })
+    .catch((err) => {
+      res.status(500).json({
+        error: `Unable to get the latest soil data for sensor with ID: ${sensorID}`
+      });
+    });
+});
+/*
+ * Route to get the current irrigation data of a sensor.
+ */
+router.get('/:sensorID/irrigation', function(req, res, next) {
+  const mongoDB = req.app.locals.mongoDB;
+  const sensorID = req.params.sensorID;
+  getSensorByID(sensorID, mongoDB)
+    .then((sensorObj) => {
+      if (sensorObj){
+        const authData = {id:sensorObject.blockID, type:"block",needsRole:SENSOR};
+        return hasAccessToFarm(authData, req.farms, mongoDB);
+      } else {
+          next();
+      }
+    })
+    .then((hasAccess) => {
+      if (hasAccess){
+        return getSensorsLatestIrrigationTime(sensorID, mongoDB);
+      } else {
+        res.status(403).json({
+          err: `User doesn't have access to sensor with id: ${sensorID}`
+        });
       }
     })
     .then((latestRecord) => {
