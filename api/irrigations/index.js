@@ -196,7 +196,7 @@ router.post('/', requireAuthentication, function(req, res, next) {
      .then((irrigationObject) => {
        if(irrigationObject){
          irrigationObj = irrigationObject;
-         const authData = {id:irrigationObj.sensorID,type:"sensor",needsRole:USER};
+         const authData = {id:irrigationObject.sensorID,type:"sensor",needsRole:USER};
          return hasAccessToFarm(authData, req.farms, mongoDB);
        } else {
            next();

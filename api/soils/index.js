@@ -209,7 +209,7 @@ router.post('/', requireAuthentication, function(req, res, next) {
      .then((soilObject) => {
        if(soilObject){
          soilObj = soilObject;
-         const authData = {id:soilObj.sensorID,type:"sensor",needsRole:USER};
+         const authData = {id:soilObject.sensorID,type:"sensor",needsRole:USER};
          return hasAccessToFarm(authData, req.farms, mongoDB);
        } else {
            next();
@@ -217,7 +217,7 @@ router.post('/', requireAuthentication, function(req, res, next) {
      })
      .then((hasAccess) => {
        if (hasAccess){
-         res.status(200).json(soilObject);
+         res.status(200).json(soilObj);
        } else {
          res.status(403).json({
            err: `User doesn't have authorization to this soil reading`

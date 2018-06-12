@@ -210,7 +210,7 @@ router.post('/', requireAuthentication, function(req, res, next) {
      .then((tempObject) => {
        if(tempObject){
          tempObj = tempObject;
-         const authData = {id:sensorObject.blockID,type:"block",needsRole:USER};
+         const authData = {id:tempObject.sensorID,type:"sensor",needsRole:USER};
          return hasAccessToFarm(authData, req.farms, mongoDB);
        } else {
            next();
@@ -226,6 +226,7 @@ router.post('/', requireAuthentication, function(req, res, next) {
        }
      })
      .catch((err) => {
+       console.log(err);
        res.status(500).json({
          error: `Unable to fetch the temperature from the database`
        });
